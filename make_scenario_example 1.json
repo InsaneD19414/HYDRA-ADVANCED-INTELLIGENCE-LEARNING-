@@ -1,0 +1,29 @@
+{
+  "name": "HYDRA Agent Enqueue Flow",
+  "steps": [
+    {
+      "trigger": "cron",
+      "cron": "*/15 * * * *"
+    },
+    {
+      "action": "GET",
+      "url": "https://api.example.com/topics",
+      "output": "topics"
+    },
+    {
+      "action": "for_each",
+      "input": "topics",
+      "do": [
+        {
+          "action": "POST",
+          "url": "http://agent-svc/enqueue",
+          "body": {
+            "input_data": {
+              "topic": "{{item}}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

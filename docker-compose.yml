@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+  monitor:
+    image: python:3.11-slim
+    command: >
+      sh -c "pip install flask && python -u - <<'PY'
+from flask import Flask, request
+app=Flask(__name__)
+@app.route('/results', methods=['POST'])
+def r():
+    print('RESULT:', request.get_json())
+    return '', 204
+app.run(host='0.0.0.0', port=8001)
+PY"
+    ports:
+      - "8001:8001"
+  agent-sample:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - AGENT_ROLE=content_writer
+      - AGENT_ID=agent-sample-1
+    depends_on:
+      - redis
+      - monitor
+    ports:
+      - "8101:8000"

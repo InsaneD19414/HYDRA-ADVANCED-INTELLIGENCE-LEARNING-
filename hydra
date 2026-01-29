@@ -1,0 +1,147 @@
+import zipfile
+import os
+
+# Path for ZIP output
+zip_path = "/mnt/data/my_hybrid_hydra_full.zip"
+
+# File structure and contents
+file_structure = {
+    "package.json": """{
+  "name": "my-hybrid-hydra",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "next": "^13.6.7",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2"
+  }
+}""",
+    ".env.local": """CDP_PROJECT_ID=d97622e3-63d7-440f-9c05-8cb3833dd1e8
+BASE_RPC_URL=https://base-mainnet.rpc.url
+CDP_API_KEY=YOUR_CDP_KEY_HERE
+NEXT_PUBLIC_BASE_URL=https://my-hybrid-app.vercel.app""",
+    "backend/intelligence_module.ts": """import { ElwoodCFO } from "./agents/elwood_cfo";
+import { UncleRuckus } from "./agents/uncle_ruckus";
+import { SamuelLAgent } from "./agents/samuel_l";
+import { BernieMac } from "./agents/bernie_mac";
+import { Granddad } from "./agents/granddad";
+import { PimpSlickback } from "./agents/pimp_slickback";
+
+export class IntelligenceModule {
+    elwood = new ElwoodCFO();
+    ruckus = new UncleRuckus();
+    slj = new SamuelLAgent();
+    bernie = new BernieMac();
+    granddad = new Granddad();
+    slickback = new PimpSlickback();
+
+    async analyzeTrade(trade: any) {
+        trade = this.elwood.evaluate(trade);
+        trade = this.bernie.realityCheck(trade);
+        trade = this.granddad.preserveCapital(trade);
+        trade = this.slickback.ensureLiquidity(trade);
+
+        const ruckusComment = this.ruckus.comment(trade);
+        const exec = this.slj.execute(trade);
+
+        return { trade, ruckusComment, exec };
+    }
+}""",
+    "pages/api/signals.ts": """import type { NextApiRequest, NextApiResponse } from "next";
+import { IntelligenceModule } from "../../backend/intelligence_module";
+
+const intel = new IntelligenceModule();
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+    const fakeTrade = {
+        ticker: "AAPL",
+        action: "BUY",
+        confidence: 0.82,
+        riskReward: 2.5,
+        exposure: 0.1,
+        size: 50000
+    };
+    const result = await intel.analyzeTrade(fakeTrade);
+    res.status(200).json(result);
+}""",
+    "pages/index.tsx": """import { useEffect, useState } from "react";
+
+export default function Dashboard() {
+    const [trade, setTrade] = useState<any>(null);
+
+    useEffect(() => {
+        fetch("/api/signals")
+            .then(res => res.json())
+            .then(setTrade);
+    }, []);
+
+    if(!trade) return <div>Loading...</div>;
+
+    return (
+        <div className="p-4">
+            <h1>HYDRA Agent Dashboard</h1>
+            <p>Trade: {trade.trade.ticker} {trade.trade.action}</p>
+            <p>Confidence: {trade.trade.confidence.toFixed(2)}</p>
+            <p>Risk/Reward: {trade.trade.riskReward}</p>
+            <p>Ruckus says: {trade.ruckusComment}</p>
+            <p>Execution: {trade.exec}</p>
+        </div>
+    );
+}"""
+}
+
+# Agent files
+agents = {
+    "elwood_cfo.ts": """export class ElwoodCFO {
+    name = "Elwood 'Tight-Ass' Von Cheapskate III";
+    evaluate(trade: any) {
+        if(trade.riskReward < 2) trade.confidence *= 0.5;
+        return trade;
+    }
+}""",
+    "uncle_ruckus.ts": """export class UncleRuckus {
+    comment(trade: any) {
+        return trade.confidence < 0.75 ? "This BS trade ain’t happening on my watch!" : "Maybe, I guess...";
+    }
+}""",
+    "samuel_l.ts": """export class SamuelLAgent {
+    execute(trade: any) {
+        return `Executing trade: ${trade.ticker} ${trade.action} at confidence ${trade.confidence.toFixed(2)}`;
+    }
+}""",
+    "bernie_mac.ts": """export class BernieMac {
+    realityCheck(trade: any) {
+        if(trade.confidence > 0.95) trade.confidence = 0.95;
+        return trade;
+    }
+}""",
+    "granddad.ts": """export class Granddad {
+    preserveCapital(trade: any) {
+        if(trade.exposure > 0.2) trade.action = "HOLD";
+        return trade;
+    }
+}""",
+    "pimp_slickback.ts": """export class PimpSlickback {
+    ensureLiquidity(trade: any) {
+        trade.liquidityOk = trade.size < 100000;
+        return trade;
+    }
+}"""
+}
+
+# Create ZIP file
+with zipfile.ZipFile(zip_path, "w") as zf:
+    for path, content in file_structure.items():
+        zf.writestr(path, content)
+    for fname, content in agents.items():
+        zf.writestr(f"backend/agents/{fname}", content)
+
+zip_path

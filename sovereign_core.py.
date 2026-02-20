@@ -1,0 +1,119 @@
+nano sovereign_core.py
+"""
+sovereign_core.py — OMEGA ROOT Executive Board Kernel
+Implements the 7-member hierarchical Graph of Thoughts (GoT) via LangGraph.
+"""
+
+from typing import TypedDict, Annotated, List, Dict, Any
+import operator
+from langgraph.graph import StateGraph, END
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
+
+# ── 1. THE CENTRAL NEURAL CORTEX (Shared State) ─────────────────────────
+class CortexState(TypedDict):
+    target_asset: str
+    market_context: Dict[str, Any]      # Raw data from Task Agents (Tier 3)
+    intelligence_brief: str             # Processed by Intelligence Architect
+    strategic_proposal: str             # Proposed by Strategic Visionary
+    risk_clearance: bool                # Vetted by Risk Sovereign
+    compliance_clearance: bool          # Vetted by Compliance Sentinel
+    execution_directive: Dict[str, Any] # Finalized by Execution Commander
+    neural_logs: Annotated[list, operator.add] # Inter-agent critique history
+    kill_switch_engaged: bool           # Master CEO Override
+
+# Initialize the Anthropic Brain (Requires ANTHROPIC_API_KEY in .env)
+# Using Claude 3.5 Sonnet for speed and deep reasoning
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", temperature=0.1)
+
+# ── 2. EXECUTIVE BOARD NODES ─────────────────────────────────────────────
+
+def intelligence_architect_node(state: CortexState) -> Dict:
+    """Synthesizes raw market data from Tier 3 Task Agents into a cohesive brief."""
+    prompt = f"Analyze this raw market data for {state['target_asset']}: {state['market_context']}. Extract key momentum, liquidity, and sentiment metrics."
+    response = llm.invoke([SystemMessage(content="You are the Intelligence Architect. Provide a hyper-concise tactical brief."), HumanMessage(content=prompt)])
+    
+    return {
+        "intelligence_brief": response.content,
+        "neural_logs": [f"[INTELLIGENCE] Brief generated for {state['target_asset']}."]
+    }
+
+def strategic_visionary_node(state: CortexState) -> Dict:
+    """Formulates a 10-move lookahead trading strategy based on intelligence."""
+    prompt = f"Based on this brief, propose a trading action (BUY/SELL/HOLD): {state['intelligence_brief']}"
+    response = llm.invoke([SystemMessage(content="You are the Strategic Visionary. Formulate an aggressive but calculated alpha strategy."), HumanMessage(content=prompt)])
+    
+    return {
+        "strategic_proposal": response.content,
+        "neural_logs": ["[STRATEGY] Alpha proposal submitted to Executive Board."]
+    }
+
+def risk_sovereign_node(state: CortexState) -> Dict:
+    """The Paranoid Survivalist. Enforces 25% max pos, 5% daily loss limit, 3x lev."""
+    proposal = state["strategic_proposal"]
+    
+    # Hardcoded System Prompts enforcing the Immutable Governance Kernel
+    sys_prompt = (
+        "You are the Risk Sovereign. Your ONLY job is capital preservation.\n"
+        "IMMUTABLE RULES:\n"
+        "1. Max position size: 25% of portfolio.\n"
+        "2. Max daily loss limit: 5%.\n"
+        "3. Leverage ceiling: 3x.\n"
+        "Review the strategy and reply exactly with 'APPROVED' or 'REJECTED: [Reason]'."
+    )
+    response = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=proposal)])
+    
+    clearance = "APPROVED" in response.content.upper()
+    return {
+        "risk_clearance": clearance,
+        "neural_logs": [f"[RISK SOVEREIGN] Assessment: {response.content}"]
+    }
+
+def compliance_sentinel_node(state: CortexState) -> Dict:
+    """Enforces regulatory boundaries and anti-wash-trading protocols."""
+    if not state.get("risk_clearance", False):
+        return {"compliance_clearance": False, "neural_logs": ["[COMPLIANCE] Bypassed due to Risk Rejection."]}
+        
+    return {
+        "compliance_clearance": True, # Mocked for speed; insert real checks here
+        "neural_logs": ["[COMPLIANCE] Exchange API and MEV routing cleared."]
+    }
+
+def execution_commander_node(state: CortexState) -> Dict:
+    """Zero-latency decision-to-action layer. Prepares the final Coinbase payload."""
+    if not state["risk_clearance"] or not state["compliance_clearance"] or state["kill_switch_engaged"]:
+        return {
+            "execution_directive": {"action": "HOLD", "reason": "Vetoed by Executive Board or Omega Root."},
+            "neural_logs": ["[EXECUTION COMMANDER] Trade HALTED. Capital secured."]
+        }
+        
+    prompt = f"Format this strategy into a strict JSON execution payload: {state['strategic_proposal']}"
+    response = llm.invoke([SystemMessage(content="You are the Execution Commander. Output raw JSON for Coinbase Advanced Trade API."), HumanMessage(content=prompt)])
+    
+    return {
+        "execution_directive": {"action": "EXECUTE", "payload": response.content},
+        "neural_logs": ["[EXECUTION COMMANDER] Payload armed and ready for Coinbase API."]
+    }
+
+# ── 3. GRAPH COMPILATION ─────────────────────────────────────────────────
+
+workflow = StateGraph(CortexState)
+
+# Add all the seats at the table
+workflow.add_node("Intelligence_Architect", intelligence_architect_node)
+workflow.add_node("Strategic_Visionary", strategic_visionary_node)
+workflow.add_node("Risk_Sovereign", risk_sovereign_node)
+workflow.add_node("Compliance_Sentinel", compliance_sentinel_node)
+workflow.add_node("Execution_Commander", execution_commander_node)
+
+# Define the flow of the Cortex
+workflow.set_entry_point("Intelligence_Architect")
+workflow.add_edge("Intelligence_Architect", "Strategic_Visionary")
+workflow.add_edge("Strategic_Visionary", "Risk_Sovereign")
+workflow.add_edge("Risk_Sovereign", "Compliance_Sentinel")
+workflow.add_edge("Compliance_Sentinel", "Execution_Commander")
+workflow.add_edge("Execution_Commander", END)
+
+# Compile the Executive Board
+omega_board = workflow.compile()

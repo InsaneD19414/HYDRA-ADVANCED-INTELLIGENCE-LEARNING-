@@ -1,0 +1,143 @@
+# ============================================================
+# Hydra Sentinel-X — Production Dockerfile
+# ============================================================
+#
+# MULTI-STAGE BUILD EXPLAINED:
+# Docker multi-stage builds use two separate FROM stages. The first
+# stage ("builder") installs all build tools and compiles dependencies.
+# The second stage ("runtime") starts from a clean slate and only
+# copies the compiled packages — not the compilers, headers, or pip
+# cache. The result is an image that is often 60-80% smaller than a
+# single-stage build, and contains no build toolchain that an attacker
+# could exploit if the container were compromised.
+#
+# Think of it like baking bread: you use a messy kitchen full of tools
+# to make the loaf, but you only put the finished loaf on the table.
+#
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+# Tell Python not to write .pyc files or buffer stdout/stderr.
+# PYTHONDONTWRITEBYTECODE keeps the image clean.
+# PYTHONUNBUFFERED ensures log lines appear in docker logs immediately
+# rather than being held in a buffer — critical for production debugging.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /build
+
+# Install system-level build dependencies.
+# We install these ONLY in the builder stage — they won't appear in the
+# final image. `--no-install-recommends` keeps this layer lean.
+# - build-essential: gcc/g++ needed to compile packages with C extensions
+# - libssl-dev:      required by some cryptographic Python packages
+# - libffi-dev:      required by cffi (used by cryptography packages)
+# - curl:            used in healthcheck and may be needed by some tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy ONLY requirements.txt first.
+# Docker caches each RUN/COPY as a separate layer. By copying requirements
+# before the source code, pip install is only re-run when requirements.txt
+# changes — not on every code change. This makes rebuilds much faster.
+COPY requirements.txt .
+
+# Install Python packages into an isolated prefix directory.
+# --prefix=/install means all packages land in /install/lib/python...
+# We copy this directory into the runtime stage later.
+# --no-cache-dir saves ~50MB by not caching the downloaded wheels.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Add the production server (uvicorn + gunicorn for production-grade serving)
+RUN pip install --no-cache-dir --prefix=/install \
+    uvicorn[standard]==0.32.0 \
+    gunicorn==23.0.0 \
+    fastapi==0.115.0 \
+    pydantic==2.9.0
+
+
+# ── Stage 2: Runtime ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # Tell Python where the packages installed in the builder stage are.
+    # Adding /install to PYTHONPATH means `import fastapi` just works.
+    PYTHONPATH=/install/lib/python3.12/site-packages
+
+# Install only the runtime system libraries we need (not build tools).
+# sqlite3 is needed by LangGraph's SQLite checkpointer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    sqlite3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Security: run as a non-root user ────────────────────────────────────────
+# Running as root inside a container is a security risk. If there's a
+# vulnerability in the app, an attacker would have root access to the
+# container's filesystem (and potentially the host via mounts).
+# We create a dedicated user "hydra" that owns only what it needs.
+RUN groupadd --gid 1001 hydra \
+    && useradd --uid 1001 --gid hydra --shell /bin/bash --create-home hydra
+
+# Copy compiled packages from the builder stage
+COPY --from=builder /install /install
+
+# Set the working directory and copy application source code
+WORKDIR /app
+COPY --chown=hydra:hydra . .
+
+# Create the memory directory that LangGraph and CryptoMemoryManager write to.
+# This directory will be OVERRIDDEN by the Docker volume mount at runtime,
+# but we create it here so the correct ownership is set on the mount point.
+# If we didn't do this, Docker would create the mount point as root.
+RUN mkdir -p /app/memory && chown -R hydra:hydra /app/memory
+
+# Create the cdp directory for wallet state if the module is present
+RUN mkdir -p /app/cdp && chown -R hydra:hydra /app/cdp
+
+# Switch to the non-root user for all subsequent commands
+USER hydra
+
+# Expose the port uvicorn will listen on
+EXPOSE 8000
+
+# ── Healthcheck ──────────────────────────────────────────────────────────────
+# Docker's HEALTHCHECK instruction tells the container runtime how to verify
+# the application is actually responding — not just that the process is alive.
+# --interval=30s : check every 30 seconds
+# --timeout=10s  : if the curl takes > 10s, mark as unhealthy
+# --start-period=20s : give the app 20s to start before checks begin
+# --retries=3    : mark unhealthy only after 3 consecutive failures
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# ── Start command ────────────────────────────────────────────────────────────
+# We use Gunicorn as the process manager with Uvicorn workers.
+# Gunicorn handles: worker crashes (auto-restart), graceful reloads,
+# and connection backlog management.
+# Uvicorn workers handle: async HTTP, WebSockets, SSE.
+#
+# --workers 2:          2 workers = handles concurrent requests
+#                       Rule of thumb: (2 × CPU cores) + 1, but keep low
+#                       because each worker loads the full LangGraph graph.
+# --worker-class:       uvicorn's async worker class
+# --bind 0.0.0.0:8000:  listen on all interfaces (required inside Docker)
+# --timeout 120:        120s timeout — agent analysis can take 30-45s
+# --keep-alive 5:       keep connections alive for 5s after a request
+# --access-logfile -:   write access logs to stdout (captured by Docker)
+# --error-logfile -:    write error logs to stdout
+CMD ["gunicorn", "server:app", \
+     "--workers", "2", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--timeout", "120", \
+     "--keep-alive", "5", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]

@@ -1,0 +1,28 @@
+# OPENCLAW SOVEREIGN v4.0 — Python Requirements
+# Core (required)
+numpy>=1.24.0
+aiohttp>=3.9.0
+websockets>=12.0
+colorama>=0.4.6
+python-dotenv>=1.0.0
+
+# TUI (recommended)
+rich>=13.0.0
+
+# Observability (recommended)
+prometheus-client>=0.19.0
+
+# Blockchain (optional — for on-chain features)
+web3>=6.0.0
+eth-account>=0.10.0
+
+# Advanced ML (optional — enables better forecasting)
+scikit-learn>=1.3.0
+pandas>=2.0.0
+pandas-ta>=0.3.14
+
+# YAML config (optional)
+pyyaml>=6.0
+
+# Faster vector similarity (optional — for memory consolidation)
+# sentence-transformers>=2.2.0
